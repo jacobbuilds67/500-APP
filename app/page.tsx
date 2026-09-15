@@ -1,0 +1,117 @@
+'use client';
+
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react';
+import { ArrowLeft, Download, History, Pencil, Plus, RotateCcw, Save, Settings, ShieldAlert, Spade, Trash2, Trophy, Upload, UserPlus, X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Database, Game, MAX_POINTS, PlayerStats, emptyDatabase, reconcileGame, statsFor, totals, uid, validateDatabase, validatePoint } from '@/lib/game';
+
+const STORAGE_KEY = 'femhundrede-data-v1';
+type Screen = 'home' | 'game' | 'history' | 'stats' | 'data';
+
+const formatDate = (iso?: string) => iso ? new Intl.DateTimeFormat('da-DK',{dateStyle:'medium',timeStyle:'short'}).format(new Date(iso)) : '—';
+const getActive = (db: Database) => db.games.find((g) => g.status === 'active');
+
+function playFanfare() {
+  try {
+    const Ctx = window.AudioContext || (window as unknown as {webkitAudioContext: typeof AudioContext}).webkitAudioContext;
+    const ctx = new Ctx();
+    [523,659,784,1047].forEach((frequency,index) => { const osc=ctx.createOscillator(); const gain=ctx.createGain(); osc.frequency.value=frequency; gain.gain.setValueAtTime(.0001,ctx.currentTime); gain.gain.exponentialRampToValueAtTime(.12,ctx.currentTime+index*.12+.02); gain.gain.exponentialRampToValueAtTime(.0001,ctx.currentTime+index*.12+.35); osc.connect(gain).connect(ctx.destination); osc.start(ctx.currentTime+index*.12); osc.stop(ctx.currentTime+index*.12+.38); });
+    return () => { void ctx.close(); };
+  } catch { return () => undefined; }
+}
+
+export default function Home() {
+  const [db,setDb] = useState<Database>(emptyDatabase);
+  const [ready,setReady] = useState(false);
+  const [screen,setScreen] = useState<Screen>('home');
+  const [gameId,setGameId] = useState<string>();
+  const [selected,setSelected] = useState<string[]>([]);
+  const [newName,setNewName] = useState('');
+  const [roundValues,setRoundValues] = useState<Record<string,string>>({});
+  const [penaltyPlayer,setPenaltyPlayer] = useState('');
+  const [penaltyValue,setPenaltyValue] = useState('');
+  const [message,setMessage] = useState('');
+  const [celebrating,setCelebrating] = useState<Game>();
+  const [statsIds,setStatsIds] = useState<string[]>([]);
+  const undoRef = useRef<Database | undefined>(undefined);
+
+  const game = db.games.find((g) => g.id === gameId);
+  const score = game ? totals(game) : {};
+
+  useEffect(() => {
+    try { const raw=localStorage.getItem(STORAGE_KEY); if(raw){ const parsed=JSON.parse(raw); if(validateDatabase(parsed)) setDb(parsed); else setMessage('De gemte data kunne ikke læses. En ny, tom tavle er åbnet.'); } } catch { setMessage('De gemte data kunne ikke læses.'); }
+    setReady(true);
+    void navigator.serviceWorker?.register('./sw.js').catch(()=>undefined);
+  },[]);
+  useEffect(() => { if(ready) localStorage.setItem(STORAGE_KEY,JSON.stringify(db)); },[db,ready]);
+  useEffect(() => { if(!celebrating) return; const stopSound=playFanfare(); const timer=window.setTimeout(()=>finishCelebration(celebrating),15000); return()=>{clearTimeout(timer);stopSound();}; },[celebrating]);
+
+  const updateDb = (next: Database, canUndo=true) => { if(canUndo) undoRef.current=db; setDb(next); };
+  const notice = (text:string) => { setMessage(text); window.setTimeout(()=>setMessage(''),3500); };
+
+  function addPlayer(e: FormEvent) {
+    e.preventDefault(); const name=newName.trim();
+    if(!name) return notice('Skriv et navn først.');
+    if(db.players.some((p)=>p.name.localeCompare(name,'da',{sensitivity:'base'})===0)) return notice('Der findes allerede en spiller med det navn.');
+    const player={id:uid(),name,createdAt:new Date().toISOString()}; updateDb({...db,players:[...db.players,player]}); setSelected([...selected,player.id]); setNewName('');
+  }
+  function togglePlayer(id:string) { setSelected((current)=>current.includes(id)?current.filter((x)=>x!==id):current.length<6?[...current,id]:current); }
+  function editPlayer(id:string) { const player=db.players.find((p)=>p.id===id); if(!player)return; const name=window.prompt('Nyt spillernavn',player.name)?.trim(); if(!name||db.players.some((p)=>p.id!==id&&p.name.toLowerCase()===name.toLowerCase()))return; updateDb({...db,players:db.players.map((p)=>p.id===id?{...p,name}:p)}); }
+  function deletePlayer(id:string) { if(db.games.some((g)=>g.status==='active'&&g.participants.some((p)=>p.playerId===id))) return notice('Spilleren deltager i et igangværende spil.'); if(!confirm('Slet spilleren? Historiske spil bevares.'))return; updateDb({...db,players:db.players.filter((p)=>p.id!==id)}); setSelected((s)=>s.filter((x)=>x!==id)); }
+  function startGame(ids=selected) { if(ids.length<2||ids.length>6)return notice('Vælg mellem 2 og 6 spillere.'); const now=new Date().toISOString(); const next:Game={id:uid(),startedAt:now,status:'active',participants:ids.map((id)=>{const p=db.players.find((x)=>x.id===id)!;return{playerId:id,name:p.name};}),rounds:[],penalties:[],winnerIds:[]}; updateDb({...db,games:[next,...db.games]}); setGameId(next.id); setScreen('game'); setRoundValues(Object.fromEntries(ids.map((id)=>[id,'']))); setPenaltyPlayer(ids[0]); }
+  function continueGame(active:Game){setGameId(active.id);setRoundValues(Object.fromEntries(active.participants.map((p)=>[p.playerId,''])));setPenaltyPlayer(active.participants[0].playerId);setScreen('game');}
+  function persistGame(next:Game, previousStatus:Game['status']) { const reconciled=reconcileGame(next); updateDb({...db,games:db.games.map((g)=>g.id===next.id?reconciled:g)}); if(previousStatus!=='completed'&&reconciled.status==='completed')setCelebrating(reconciled); return reconciled; }
+  function saveRound(e:FormEvent){e.preventDefault();if(!game)return;const points:Record<string,number>={};for(const p of game.participants){const value=validatePoint(roundValues[p.playerId]);if(value===null)return notice(`Brug hele tal mellem -${MAX_POINTS} og ${MAX_POINTS}.`);points[p.playerId]=value;} persistGame({...game,rounds:[...game.rounds,{id:uid(),createdAt:new Date().toISOString(),points}]},game.status);setRoundValues(Object.fromEntries(game.participants.map((p)=>[p.playerId,''])));notice('Omgangen er gemt.');}
+  function savePenalty(e:FormEvent){e.preventDefault();if(!game)return;const points=validatePoint(penaltyValue,true);if(points===null)return notice(`Strafpoint skal være et helt tal mellem 1 og ${MAX_POINTS}.`);persistGame({...game,penalties:[...game.penalties,{id:uid(),createdAt:new Date().toISOString(),playerId:penaltyPlayer,points}]},game.status);setPenaltyValue('');notice('Strafpoint er trukket fra.');}
+  function editRound(roundId:string){if(!game)return;const round=game.rounds.find((r)=>r.id===roundId);if(!round)return;const next={...round.points};for(const p of game.participants){const entered=prompt(`Point til ${p.name}`,String(next[p.playerId]));if(entered===null)return;const value=validatePoint(entered);if(value===null)return notice('Ugyldige point.');next[p.playerId]=value;}persistGame({...game,rounds:game.rounds.map((r)=>r.id===roundId?{...r,points:next}:r)},game.status);}
+  function deleteRound(id:string){if(!game||!confirm('Slet denne omgang?'))return;persistGame({...game,rounds:game.rounds.filter((r)=>r.id!==id)},game.status);}
+  function editPenalty(id:string){if(!game)return;const item=game.penalties.find((p)=>p.id===id);const entered=prompt('Nyt antal strafpoint',String(item?.points??''));if(entered===null)return;const points=validatePoint(entered,true);if(points===null)return notice('Ugyldige strafpoint.');persistGame({...game,penalties:game.penalties.map((p)=>p.id===id?{...p,points}:p)},game.status);}
+  function deletePenalty(id:string){if(!game||!confirm('Slet dette strafpoint?'))return;persistGame({...game,penalties:game.penalties.filter((p)=>p.id!==id)},game.status);}
+  function cancelGame(){if(!game||!confirm('Afslut dette spil uden en vinder?'))return;const next={...game,status:'cancelled' as const,endedAt:new Date().toISOString()};updateDb({...db,games:db.games.map((g)=>g.id===game.id?next:g)});setScreen('home');setGameId(undefined);}
+  function finishCelebration(winnerGame:Game){setCelebrating(undefined);setStatsIds(winnerGame.participants.map((p)=>p.playerId));setScreen('stats');setGameId(winnerGame.id);}
+  function repeatGame(source?:Game){const original=source??game;if(!original)return;setSelected(original.participants.map((p)=>p.playerId).filter((id)=>db.players.some((x)=>x.id===id)));setScreen('home');setGameId(undefined);}
+  function exportData(){const blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`500-sikkerhedskopi-${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(url);}
+  function importData(e:ChangeEvent<HTMLInputElement>){const file=e.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{if(typeof reader.result!=='string')throw new Error();const parsed=JSON.parse(reader.result);if(!validateDatabase(parsed))throw new Error();if(confirm('Importen erstatter alle nuværende data. Fortsæt?'))updateDb(parsed);}catch{notice('Filen er ikke en gyldig sikkerhedskopi.');}};reader.readAsText(file);e.target.value='';}
+  function clearData(){if(!confirm('Vil du slette alle spillere og spil?'))return;if(!confirm('Er du helt sikker? Handlingen kan ikke fortrydes uden en sikkerhedskopi.'))return;updateDb(emptyDatabase(),false);setScreen('home');setGameId(undefined);setSelected([]);}
+  function undo(){if(!undoRef.current)return;const previous=undoRef.current;undoRef.current=db;setDb(previous);notice('Seneste ændring er fortrudt.');}
+
+  if(!ready)return <main className="app-shell"><p className="loading">Blander kortene …</p></main>;
+  return <main className="app-shell">
+    <Header screen={screen} goHome={()=>{setScreen('home');setGameId(undefined)}} openData={()=>setScreen('data')} />
+    {message&&<output className="toast">{message}</output>}
+    {screen==='home'&&<HomeScreen db={db} selected={selected} newName={newName} setNewName={setNewName} toggle={togglePlayer} add={addPlayer} edit={editPlayer} remove={deletePlayer} start={()=>startGame()} active={getActive(db)} resume={continueGame} history={()=>setScreen('history')} data={()=>setScreen('data')} />}
+    {screen==='game'&&game&&<GameScreen game={game} score={score} values={roundValues} setValues={setRoundValues} saveRound={saveRound} penaltyPlayer={penaltyPlayer} setPenaltyPlayer={setPenaltyPlayer} penaltyValue={penaltyValue} setPenaltyValue={setPenaltyValue} savePenalty={savePenalty} editRound={editRound} deleteRound={deleteRound} editPenalty={editPenalty} deletePenalty={deletePenalty} undo={undo} canUndo={!!undoRef.current} cancel={cancelGame}/>} 
+    {screen==='history'&&<HistoryScreen db={db} open={(g)=>{setGameId(g.id);if(g.status==='active')continueGame(g);else{setStatsIds(g.participants.map((p)=>p.playerId));setScreen('stats')}}}/>} 
+    {screen==='stats'&&<StatsScreen db={db} ids={statsIds} game={game} newGame={()=>{setSelected([]);setScreen('home')}} repeat={()=>repeatGame(game)} history={()=>setScreen('history')} back={()=>setScreen('home')}/>} 
+    {screen==='data'&&<DataScreen exportData={exportData} importData={importData} clearData={clearData} db={db}/>} 
+    {celebrating&&<Celebration game={celebrating} close={()=>finishCelebration(celebrating)}/>} 
+  </main>;
+}
+
+function Header({screen,goHome,openData}:{screen:Screen;goHome:()=>void;openData:()=>void}){return <header className="topbar">{screen==='home'?<div className="brand-mark" aria-hidden><Spade/></div>:<Button variant="ghost" size="icon-lg" aria-label="Tilbage" onClick={goHome}><ArrowLeft/></Button>}<div><p className="eyebrow">Pointtavle</p><h1>500</h1></div><Button variant="ghost" size="icon-lg" aria-label="Indstillinger og data" onClick={openData}><Settings/></Button></header>}
+
+function HomeScreen({db,selected,newName,setNewName,toggle,add,edit,remove,start,active,resume,history,data}:{db:Database;selected:string[];newName:string;setNewName:(x:string)=>void;toggle:(id:string)=>void;add:(e:FormEvent)=>void;edit:(id:string)=>void;remove:(id:string)=>void;start:()=>void;active?:Game;resume:(g:Game)=>void;history:()=>void;data:()=>void}){return <>
+  <section className="welcome"><p className="suit-line" aria-hidden>♥ · ♣ · ♦ · ♠</p><h2>Klar til et spil?</h2><p>Vælg 2–6 spillere, og lad os holde styr på pointene.</p></section>
+  {active&&<button className="resume-card" onClick={()=>resume(active)}><span><b>Fortsæt spil</b><small>{active.participants.map((p)=>p.name).join(', ')}</small></span><span>Fortsæt →</span></button>}
+  <section className="panel"><div className="section-heading"><div><span>01</span><h3>Vælg spillere</h3></div><small>{selected.length} af 6 valgt</small></div>
+    <div className="player-list">{db.players.map((p)=><div className={`player-row ${selected.includes(p.id)?'selected':''}`} key={p.id}><button onClick={()=>toggle(p.id)} aria-pressed={selected.includes(p.id)}><span className="player-avatar">{p.name.slice(0,1).toUpperCase()}</span><b>{p.name}</b></button><Button variant="ghost" size="icon" aria-label={`Rediger ${p.name}`} onClick={()=>edit(p.id)}><Pencil/></Button><Button variant="ghost" size="icon" aria-label={`Slet ${p.name}`} onClick={()=>remove(p.id)}><Trash2/></Button></div>)}</div>
+    <form className="add-form" onSubmit={add}><label htmlFor="new-player" className="sr-only">Nyt spillernavn</label><Input id="new-player" value={newName} onChange={(e)=>setNewName(e.target.value)} maxLength={30} placeholder="Nyt spillernavn"/><Button type="submit" variant="secondary"><UserPlus/>Tilføj</Button></form>
+    <Button className="primary-action" disabled={selected.length<2||selected.length>6} onClick={start}>Start spil</Button>
+  </section>
+  <nav className="quick-links"><button onClick={history}><History/><span><b>Historik</b><small>Se tidligere spil</small></span></button><button onClick={data}><Settings/><span><b>Data</b><small>Sikkerhedskopi</small></span></button></nav><p className="local-note">Dine spil gemmes kun på denne enhed</p>
+  </>}
+
+function GameScreen({game,score,values,setValues,saveRound,penaltyPlayer,setPenaltyPlayer,penaltyValue,setPenaltyValue,savePenalty,editRound,deleteRound,editPenalty,deletePenalty,undo,canUndo,cancel}:{game:Game;score:Record<string,number>;values:Record<string,string>;setValues:(v:Record<string,string>)=>void;saveRound:(e:FormEvent)=>void;penaltyPlayer:string;setPenaltyPlayer:(v:string)=>void;penaltyValue:string;setPenaltyValue:(v:string)=>void;savePenalty:(e:FormEvent)=>void;editRound:(id:string)=>void;deleteRound:(id:string)=>void;editPenalty:(id:string)=>void;deletePenalty:(id:string)=>void;undo:()=>void;canUndo:boolean;cancel:()=>void}){const lead=Math.max(...Object.values(score));return <section className="game-screen"><div className="game-meta"><p>Omgang {game.rounds.length+1}</p><small>Startet {formatDate(game.startedAt)}</small></div><div className="score-grid">{game.participants.map((p)=><article className={`score-card ${score[p.playerId]===lead&&game.rounds.length?'leader':''}`} key={p.playerId}><small>{score[p.playerId]===lead&&game.rounds.length?'Fører':'Spiller'}</small><h2>{p.name}</h2><strong>{score[p.playerId]}</strong><span>point</span></article>)}</div>
+  <form className="panel round-form" onSubmit={saveRound}><div className="section-heading"><div><span>{String(game.rounds.length+1).padStart(2,'0')}</span><h3>Ny omgang</h3></div></div>{game.participants.map((p)=><label key={p.playerId}><span>{p.name}</span><Input inputMode="numeric" type="number" min={-MAX_POINTS} max={MAX_POINTS} value={values[p.playerId]??''} onChange={(e)=>setValues({...values,[p.playerId]:e.target.value})} placeholder="0" required/></label>)}<Button type="submit" className="primary-action"><Save/>Gem omgang</Button></form>
+  <form className="panel penalty-form" onSubmit={savePenalty}><div className="section-heading"><div><span>!</span><h3>Strafpoint</h3></div></div><label htmlFor="penalty-player"><span>Spiller</span></label><select id="penalty-player" value={penaltyPlayer} onChange={(e)=>setPenaltyPlayer(e.target.value)}>{game.participants.map((p)=><option key={p.playerId} value={p.playerId}>{p.name}</option>)}</select><label htmlFor="penalty-points"><span>Antal</span></label><Input id="penalty-points" type="number" inputMode="numeric" min="1" max={MAX_POINTS} value={penaltyValue} onChange={(e)=>setPenaltyValue(e.target.value)} placeholder="Fx 50" required/><Button variant="secondary" type="submit"><ShieldAlert/>Træk strafpoint</Button></form>
+  <section className="panel history-events"><div className="section-heading"><div><span>↺</span><h3>Spillets historik</h3></div><Button variant="ghost" size="sm" onClick={undo} disabled={!canUndo}><RotateCcw/>Fortryd</Button></div>{!game.rounds.length&&!game.penalties.length?<p className="empty-text">Ingen point registreret endnu.</p>:<>{game.rounds.map((r,i)=><div className="event-row" key={r.id}><div><b>Omgang {i+1}</b><small>{game.participants.map((p)=>`${p.name}: ${r.points[p.playerId]}`).join(' · ')}</small></div><Button variant="ghost" size="icon-sm" onClick={()=>editRound(r.id)} aria-label="Rediger omgang"><Pencil/></Button><Button variant="ghost" size="icon-sm" onClick={()=>deleteRound(r.id)} aria-label="Slet omgang"><Trash2/></Button></div>)}{game.penalties.map((p)=><div className="event-row penalty" key={p.id}><div><b>Strafpoint</b><small>{game.participants.find((x)=>x.playerId===p.playerId)?.name}: −{p.points}</small></div><Button variant="ghost" size="icon-sm" onClick={()=>editPenalty(p.id)}><Pencil/></Button><Button variant="ghost" size="icon-sm" onClick={()=>deletePenalty(p.id)}><Trash2/></Button></div>)}</>}</section><Button variant="destructive" className="cancel-game" onClick={cancel}><X/>Annuller spil</Button></section>}
+
+function HistoryScreen({db,open}:{db:Database;open:(g:Game)=>void}){return <section className="page-section"><h2>Spilhistorik</h2><p className="intro">Alle spil på denne enhed.</p>{!db.games.length?<div className="panel empty-text">Ingen spil endnu.</div>:<div className="history-list">{db.games.map((g)=>{const score=totals(g);return <button key={g.id} onClick={()=>open(g)}><div><b>{formatDate(g.startedAt)}</b><small>{g.participants.map((p)=>p.name).join(', ')}</small></div><div className="history-result"><span className={`status ${g.status}`}>{g.status==='completed'?'Afsluttet':g.status==='active'?'I gang':'Annulleret'}</span>{g.status==='completed'&&<small>{g.participants.map((p)=>`${p.name} ${score[p.playerId]}`).join(' · ')}</small>}</div></button>})}</div>}</section>}
+
+function StatsScreen({db,ids,game,newGame,repeat,history,back}:{db:Database;ids:string[];game?:Game;newGame:()=>void;repeat:()=>void;history:()=>void;back:()=>void}){const since=new Date();since.setDate(since.getDate()-30);const all=statsFor(db.games,db.players).filter((s)=>!ids.length||ids.includes(s.playerId));const recent=statsFor(db.games,db.players,since).filter((s)=>!ids.length||ids.includes(s.playerId));return <section className="page-section"><div className="stats-title"><Trophy/><div><h2>{game?.status==='completed'?'Spillet er slut!':'Statistik'}</h2>{game?.winnerIds.length?<p>Vinder: {game.participants.filter((p)=>game.winnerIds.includes(p.playerId)).map((p)=>p.name).join(' & ')}</p>:<p>Seneste resultater</p>}</div></div><StatsTable title="Seneste 30 dage" rows={recent}/><StatsTable title="All time" rows={all}/><div className="action-grid"><Button onClick={newGame}><Plus/>Nyt spil</Button><Button variant="secondary" onClick={repeat} disabled={!game}>Spil igen</Button><Button variant="outline" onClick={history}><History/>Historik</Button><Button variant="ghost" onClick={back}><ArrowLeft/>Tilbage</Button></div></section>}
+function StatsTable({title,rows}:{title:string;rows:PlayerStats[]}){return <section className="panel stats-panel"><h3>{title}</h3>{!rows.length?<p className="empty-text">Ingen afsluttede spil i perioden.</p>:<div className="table-wrap"><table><thead><tr><th>Spiller</th><th>Spil</th><th>Point</th><th>V</th><th>T</th><th>Straf</th></tr></thead><tbody>{rows.map((r)=><tr key={r.playerId}><th>{r.name}</th><td>{r.games}</td><td>{r.points}</td><td>{r.wins}</td><td>{r.losses}</td><td title={`${r.penaltyPoints} strafpoint`}>{r.penaltyEvents}</td></tr>)}</tbody></table></div>}</section>}
+
+function DataScreen({exportData,importData,clearData,db}:{exportData:()=>void;importData:(e:ChangeEvent<HTMLInputElement>)=>void;clearData:()=>void;db:Database}){return <section className="page-section"><h2>Data og sikkerhed</h2><p className="intro">Alle oplysninger ligger kun i denne browser. Lav en sikkerhedskopi, hvis du skifter enhed.</p><div className="panel data-actions"><div><b>{db.players.length}</b><small>spillere</small></div><div><b>{db.games.length}</b><small>spil</small></div><Button onClick={exportData}><Download/>Eksportér sikkerhedskopi</Button><label className="import-button"><Upload/>Importér sikkerhedskopi<input type="file" accept="application/json" onChange={importData}/></label><Button variant="destructive" onClick={clearData}><Trash2/>Slet alle data</Button></div><section className="panel install-help"><h3>Installér på iPhone eller iPad</h3><ol><li>Åbn appen i Safari.</li><li>Tryk på Del-knappen.</li><li>Vælg “Føj til hjemmeskærm”.</li></ol><p>Efter første besøg kan appen bruges uden internet.</p></section></section>}
+
+function Celebration({game,close}:{game:Game;close:()=>void}){const winners=game.participants.filter((p)=>game.winnerIds.includes(p.playerId)).map((p)=>p.name).join(' & ');return <button className="celebration" onClick={close} aria-label="Stop fejringen og vis statistik"><div className="firework f1"/><div className="firework f2"/><div className="firework f3"/><p>♠ ♥ ♣ ♦</p><Trophy/><small>Vi har en vinder!</small><h2>{winners}</h2><strong>{Math.max(...Object.values(totals(game)))} point</strong><span>Tryk for at gå videre</span></button>}
