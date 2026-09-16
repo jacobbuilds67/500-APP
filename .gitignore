@@ -7,5 +7,6 @@ dist/
 *.log
 *.tsbuildinfo
 500-sikkerhedskopi-*.json
+500-komplet-import-*.json
 .env*
 !.env.example

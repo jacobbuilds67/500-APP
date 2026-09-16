@@ -9,6 +9,7 @@ export type Penalty = { id: string; createdAt: string; playerId: string; points:
 export type Game = {
   id: string; startedAt: string; endedAt?: string; status: 'active' | 'completed' | 'cancelled';
   participants: Participant[]; rounds: Round[]; penalties: Penalty[]; winnerIds: string[];
+  legacyRoundCount?: number; legacyDetailsUnavailable?: boolean;
 };
 export type Database = { version: number; players: Player[]; games: Game[] };
 export type PlayerStats = { playerId: string; name: string; games: number; points: number; wins: number; losses: number; penaltyEvents: number; penaltyPoints: number };
