@@ -42,3 +42,34 @@ button:focus-visible,input:focus-visible { outline:3px solid color-mix(in srgb,v
 .penalty-form .section-heading,.penalty-form button { grid-column:1/-1; }
 .penalty-form label { display:block; margin-top:0; font-weight:700; }
 .penalty-form select { width:100%; }
+.history-overview { padding-bottom:36px; }
+.overview-section { margin-bottom:26px; }
+.overview-heading,.overview-heading>div { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.overview-heading { margin:4px 0 12px; }
+.overview-heading>div>span { display:grid; place-items:center; width:31px; height:31px; border-radius:50%; background:var(--secondary); color:#86672f; font-weight:800; font-size:.72rem; }
+.overview-heading h3 { margin:0; font:700 1.25rem Georgia,serif; }
+.overview-heading small { color:#7d776c; }
+.history-item { position:relative; display:grid; grid-template-columns:1fr 48px; align-items:stretch; border:1px solid #d8cdb9; border-radius:13px; background:#fffdf8; overflow:hidden; }
+.history-open { width:100%; display:grid; grid-template-columns:1fr auto; gap:10px; padding:16px; border:0; background:transparent; color:inherit; text-align:left; }
+.history-open>div { display:grid; gap:5px; }
+.history-list em { color:#92713c; font-size:.74rem; font-style:normal; font-weight:700; }
+.open-label { margin-top:4px; color:#1f6656; font-size:.72rem; font-weight:800; }
+.delete-history { width:48px; height:100%; border-radius:0; border-left:1px solid #ead8d3; }
+.text-back { display:flex; align-items:center; gap:7px; margin-bottom:18px; padding:0; border:0; background:transparent; color:#35685c; font-weight:800; }
+.text-back svg { width:18px; }
+.detail-title { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:18px; }
+.detail-title h2 { margin:3px 0 5px; font:700 1.8rem Georgia,serif; }
+.detail-title p { margin:0; color:#74766f; }
+.winner-summary { display:flex; align-items:center; gap:12px; margin-bottom:14px; padding:15px 18px; border:1px solid #d8bd78; border-radius:14px; background:#fff6d8; }
+.winner-summary svg { width:32px; color:#9c711f; }
+.winner-summary div { display:grid; }.winner-summary small { color:#806b3e; }.winner-summary b { font:700 1.25rem Georgia,serif; }
+.detail-scores h3,.detail-penalties h3 { margin:0 0 12px; font:700 1.2rem Georgia,serif; }
+.detail-scores>div,.detail-penalties>div { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 0; border-top:1px solid #ece4d6; }
+.detail-penalties span { display:grid; }.detail-penalties small { color:#817a6f; font-size:.72rem; }
+.detail-penalties strong,.negative { color:#a44237; }
+.detail-rounds>article { padding:15px 0; border-top:1px solid #e7ddcb; }
+.round-number { display:flex; justify-content:space-between; gap:10px; margin-bottom:10px; }.round-number small { color:#817a6f; }
+.round-points { display:grid; grid-template-columns:repeat(2,1fr); gap:7px; }
+.round-points>div { display:flex; justify-content:space-between; gap:8px; padding:8px 10px; border-radius:8px; background:#f4eee2; }
+.delete-complete-game { width:100%; min-height:48px; margin:18px 0 30px; }
+@media(max-width:520px){.history-open{grid-template-columns:1fr}.history-result{text-align:left;justify-items:start}.detail-title{flex-direction:column}.round-points{grid-template-columns:1fr}}
