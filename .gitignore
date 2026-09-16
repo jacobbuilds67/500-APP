@@ -6,5 +6,6 @@ dist/
 .DS_Store
 *.log
 *.tsbuildinfo
+500-sikkerhedskopi-*.json
 .env*
 !.env.example

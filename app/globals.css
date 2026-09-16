@@ -72,4 +72,7 @@ button:focus-visible,input:focus-visible { outline:3px solid color-mix(in srgb,v
 .round-points { display:grid; grid-template-columns:repeat(2,1fr); gap:7px; }
 .round-points>div { display:flex; justify-content:space-between; gap:8px; padding:8px 10px; border-radius:8px; background:#f4eee2; }
 .delete-complete-game { width:100%; min-height:48px; margin:18px 0 30px; }
+.stats-leader { background:#fff8df; }
+.stats-player-name { display:inline-flex; align-items:center; gap:6px; }
+.stats-player-name svg { width:16px; height:16px; color:#a67420; fill:#f2cf65; filter:drop-shadow(0 1px 1px #7a551b33); }
 @media(max-width:520px){.history-open{grid-template-columns:1fr}.history-result{text-align:left;justify-items:start}.detail-title{flex-direction:column}.round-points{grid-template-columns:1fr}}
